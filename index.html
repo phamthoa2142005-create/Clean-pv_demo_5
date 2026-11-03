@@ -1,0 +1,1320 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PV O&M Multi-Project Cloud Platform - Hệ Thống Quản Lý & Vệ Sinh Pin PV</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Supabase JS Client v2 -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #1e293b; }
+    .card-clean { background: #ffffff; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05); }
+    .pulse-dot { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased">
+
+  <!-- HỘP THÔNG BÁO TOAST -->
+  <div id="toastContainer" class="fixed top-5 right-5 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"></div>
+
+  <!-- MODAL ĐĂNG NHẬP / ĐĂNG KÝ VỚI SUPABASE AUTH -->
+  <div id="authScreen" class="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="card-clean rounded-3xl w-full max-w-md p-6 sm:p-8 bg-white border border-slate-200 shadow-2xl relative">
+      <div class="text-center mb-6">
+        <div class="w-12 h-12 bg-blue-600 text-white rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-blue-500/30 mb-3">
+          <i data-lucide="sun-medium" class="w-7 h-7"></i>
+        </div>
+        <h2 class="text-xl font-bold text-slate-900" id="authTitle">Đăng nhập PV O&M Platform</h2>
+        <p class="text-xs text-slate-500 mt-1" id="authSubtitle">Đồng bộ đám mây Supabase - Quản lý mọi thiết bị</p>
+      </div>
+
+      <!-- Thông tin kết nối đám mây -->
+      <div class="mb-5 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-start gap-2.5">
+        <i data-lucide="cloud-check" class="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0"></i>
+        <div class="flex-1">
+          <p class="font-semibold">Đám Mây Supabase Đã Kết Nối</p>
+          <p class="text-[11px] text-emerald-700 mt-0.5">Tài khoản & dự án được lưu online, đăng nhập ở bất cứ máy tính nào cũng giữ nguyên dữ liệu.</p>
+        </div>
+      </div>
+
+      <!-- Khung thông báo lỗi / trạng thái trực tiếp trên Modal -->
+      <div id="authAlertBox" class="hidden mb-4 p-3 rounded-xl text-xs font-medium border flex items-start gap-2">
+        <i data-lucide="alert-circle" id="authAlertIcon" class="w-4 h-4 mt-0.5 flex-shrink-0"></i>
+        <span id="authAlertMsg" class="flex-1"></span>
+      </div>
+
+      <div class="space-y-4 text-xs">
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">Email kỹ sư / quản lý</label>
+          <input type="email" id="authEmailInput" placeholder="name@company.com" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-slate-50">
+        </div>
+
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">Mật khẩu (tối thiểu 6 ký tự)</label>
+          <input type="password" id="authPasswordInput" placeholder="••••••••" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-slate-50">
+        </div>
+
+        <button type="button" id="authSubmitBtn" onclick="handleAuthSubmitDirect()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-semibold rounded-xl transition-all shadow-md shadow-blue-500/20 text-sm mt-2 flex items-center justify-center gap-2 cursor-pointer">
+          <i data-lucide="log-in" class="w-4 h-4" id="authBtnIcon"></i> <span id="authSubmitText">Đăng nhập</span>
+        </button>
+      </div>
+
+      <div class="mt-5 text-center text-xs text-slate-600">
+        <span id="authToggleQuestion">Chưa có tài khoản kỹ sư?</span>
+        <button type="button" onclick="toggleAuthMode()" class="text-blue-600 font-semibold hover:underline ml-1" id="authToggleBtn">Tạo tài khoản mới</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- APPLICATION TOPBAR -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      
+      <!-- Brand & Project Selector -->
+      <div class="flex items-center gap-3 md:gap-5 min-w-0">
+        <div class="p-2 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-xl shadow-sm flex-shrink-0">
+          <i data-lucide="sun" class="w-5 h-5"></i>
+        </div>
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 uppercase tracking-wider hidden sm:inline-block">DỰ ÁN ĐANG CHỌN</span>
+            <span class="text-[11px] text-slate-400 font-mono hidden md:inline-block" id="topbarProjectCoords">10.7769°N, 106.7009°E</span>
+          </div>
+          <div class="flex items-center gap-1.5 mt-0.5">
+            <select id="projectSelect" onchange="switchProject(this.value)" class="text-sm sm:text-base font-bold text-slate-900 bg-transparent hover:bg-slate-50 rounded-lg py-0.5 pr-6 cursor-pointer border-none focus:ring-2 focus:ring-blue-500 truncate max-w-[200px] sm:max-w-[340px]">
+              <option value="">Đang tải dự án...</option>
+            </select>
+            <button onclick="openProjectModal('edit')" class="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 transition" title="Chỉnh sửa thông số dự án">
+              <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons & User Menu -->
+      <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+        <button onclick="openProjectModal('new')" class="px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition flex items-center gap-1.5 shadow-sm">
+          <i data-lucide="folder-plus" class="w-3.5 h-3.5"></i>
+          <span class="hidden sm:inline">Thêm dự án mới</span>
+        </button>
+
+        <div class="h-6 w-px bg-slate-200 mx-1 hidden sm:block"></div>
+
+        <!-- User profile & Logout -->
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-xs border border-blue-200" id="userAvatar">PV</div>
+          <div class="hidden lg:block text-left text-xs leading-tight">
+            <div class="font-semibold text-slate-900 truncate max-w-[140px]" id="userNameDisplay">engineer@cloud.vn</div>
+            <span class="text-[10px] text-emerald-600 font-medium">● Đám mây Supabase</span>
+          </div>
+          <button onclick="handleLogout()" class="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition" title="Đăng xuất khỏi hệ thống">
+            <i data-lucide="log-out" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- SUBHEADER / TOOLBAR -->
+  <div class="bg-slate-50 border-b border-slate-200 py-3">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+      <div class="flex items-center gap-2 text-slate-600">
+        <span class="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-slate-200 font-medium shadow-sm">
+          <i data-lucide="map-pin" class="w-3.5 h-3.5 text-rose-500"></i>
+          <span id="badgeLocationName">TP. Hồ Chí Minh</span>
+        </span>
+        <span class="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-slate-200 font-medium shadow-sm">
+          <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-500"></i>
+          <span id="badgePpeak">100 kWp</span>
+        </span>
+        <span class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-slate-200 font-medium shadow-sm">
+          <i data-lucide="cloud" class="w-3.5 h-3.5 text-blue-500"></i>
+          <span id="syncStatusBadge">Open-Meteo Khí Tượng</span>
+        </span>
+      </div>
+
+      <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
+        <button onclick="exportToCSV()" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-slate-700 font-medium transition flex items-center gap-1.5 shadow-sm" title="Xuất báo cáo kinh tế O&M ra CSV">
+          <i data-lucide="download" class="w-3.5 h-3.5 text-emerald-600"></i> Xuất CSV
+        </button>
+
+        <button id="syncApiBtn" onclick="fetchLiveDataForCurrentProject()" class="px-3.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-slate-700 font-medium transition flex items-center gap-1.5 shadow-sm">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-blue-600" id="syncIcon"></i> Đồng bộ ngay
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN DASHBOARD -->
+  <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- BÁO CÁO KINH TẾ SO SÁNH O&M -->
+    <div class="p-6 rounded-2xl card-clean border-emerald-200 bg-white space-y-5">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+        <div class="flex items-center gap-3">
+          <span class="p-2.5 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200">
+            <i data-lucide="wallet" class="w-6 h-6"></i>
+          </span>
+          <div>
+            <h2 class="text-base sm:text-lg font-bold text-slate-900 uppercase tracking-wide">Báo Cáo Hiệu Quả Kinh Tế O&M Toàn Chu Kỳ</h2>
+            <p class="text-xs text-slate-500">So sánh Định kỳ 90 ngày vs Mô hình điều phối thông minh đón mưa tự nhiên</p>
+          </div>
+        </div>
+        <div class="text-left sm:text-right bg-emerald-50/70 sm:bg-transparent p-3 sm:p-0 rounded-xl border border-emerald-100 sm:border-none">
+          <span class="text-xs text-slate-500 block">Số tiền tiết kiệm ròng dự tính:</span>
+          <div class="text-2xl sm:text-3xl font-black text-emerald-600 tracking-tight" id="dispTotalSavings">0 VNĐ</div>
+          <span class="text-xs font-semibold text-emerald-700" id="dispSavingPercentBadge">(Tiết kiệm 0.0%)</span>
+        </div>
+      </div>
+
+      <!-- 2 Cột Phương án -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5 text-xs">
+        <div class="p-5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+          <div class="flex justify-between items-center text-slate-700 font-medium pb-2 border-b border-slate-200">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+              <span class="text-sm font-semibold text-slate-900">1. Chiến lược Định Kỳ (90 ngày/lần)</span>
+            </div>
+            <span class="px-2.5 py-1 rounded-full bg-rose-100 text-rose-700 font-semibold" id="dispKb1Count">0 lần rửa</span>
+          </div>
+          <div class="space-y-2 pt-1 text-slate-600">
+            <div class="flex justify-between">
+              <span>Chi phí nhân công & vật tư rửa:</span>
+              <span class="font-semibold text-slate-800" id="dispKb1CleanCost">0 VNĐ</span>
+            </div>
+            <div class="flex justify-between">
+              <span>Thiệt hại tổn thất điện lũy kế:</span>
+              <span class="font-semibold text-slate-800" id="dispKb1LossMoney">0 VNĐ</span>
+            </div>
+            <div class="flex justify-between text-rose-600 border-t border-slate-200 pt-2 font-bold text-sm sm:text-base">
+              <span>TỔNG THIỆT HẠI:</span>
+              <span id="dispKb1Total">0 VNĐ</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-5 rounded-xl bg-emerald-50/50 border border-emerald-200 space-y-3">
+          <div class="flex justify-between items-center text-emerald-800 font-medium pb-2 border-b border-emerald-200/60">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span class="text-sm font-semibold text-emerald-900">2. Chiến Lược Tối Ưu (Đề Xuất Dự Án)</span>
+            </div>
+            <span class="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-semibold" id="dispKb2Count">0 lần rửa</span>
+          </div>
+          <div class="space-y-2 pt-1 text-slate-600">
+            <div class="flex justify-between">
+              <span>Chi phí rửa pin thực tế:</span>
+              <span class="font-semibold text-slate-800" id="dispKb2CleanCost">0 VNĐ</span>
+            </div>
+            <div class="flex justify-between">
+              <span>Thiệt hại tổn thất sau tối ưu:</span>
+              <span class="font-semibold text-slate-800" id="dispKb2LossMoney">0 VNĐ</span>
+            </div>
+            <div class="flex justify-between text-emerald-600 border-t border-emerald-200 pt-2 font-bold text-sm sm:text-base">
+              <span>TỔNG CHI PHÍ TỐI ƯU:</span>
+              <span id="dispKb2Total">0 VNĐ</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BANNER KHUYẾN NGHỊ THỜI GIAN THỰC -->
+    <div id="statusBanner" class="p-5 rounded-2xl border transition-all duration-300 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 card-clean">
+      <div class="flex items-center gap-4">
+        <div id="statusIconWrap" class="p-3.5 rounded-xl flex-shrink-0"></div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded" id="statusBadge">TRẠNG THÁI</span>
+            <span class="text-xs text-slate-500" id="statusRule">Ngưỡng L* = --% | Ngưỡng Kimber = 6.00 mm</span>
+          </div>
+          <h2 class="text-lg md:text-xl font-bold mt-1 text-slate-900" id="statusTitle">Đang nạp dữ liệu quan trắc...</h2>
+          <p class="text-xs md:text-sm text-slate-600 mt-0.5" id="statusDesc"></p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 w-full md:w-auto">
+        <button id="actionBtn" onclick="confirmCleanNow()" class="w-full md:w-auto px-5 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2">
+          <i data-lucide="sparkles" class="w-4 h-4"></i> Xác nhận đã vệ sinh pin
+        </button>
+      </div>
+    </div>
+
+    <!-- KPI CARDS -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="p-5 rounded-2xl card-clean">
+        <div class="flex justify-between items-start">
+          <span class="text-xs font-medium text-slate-500">Tổn thất công suất (L<sub>t</sub>)</span>
+          <span class="p-2 rounded-lg bg-amber-50 text-amber-600"><i data-lucide="trending-down" class="w-4 h-4"></i></span>
+        </div>
+        <div class="mt-3 flex items-baseline gap-2">
+          <span class="text-3xl font-bold text-slate-900 tracking-tight" id="valCurrentLoss">0.00%</span>
+          <span class="text-xs text-slate-500" id="valThresholdComp">/ 4.80% (L*)</span>
+        </div>
+        <div class="w-full bg-slate-100 h-1.5 rounded-full mt-3 overflow-hidden">
+          <div id="lossProgressBar" class="h-full bg-amber-500 rounded-full transition-all duration-500" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <div class="p-5 rounded-2xl card-clean">
+        <div class="flex justify-between items-start">
+          <span class="text-xs font-medium text-slate-500">Lượng mưa hôm nay</span>
+          <span class="p-2 rounded-lg bg-blue-50 text-blue-600"><i data-lucide="cloud-rain" class="w-4 h-4"></i></span>
+        </div>
+        <div class="mt-3 flex items-baseline gap-2">
+          <span class="text-3xl font-bold text-slate-900 tracking-tight" id="valTodayRain">0.00</span>
+          <span class="text-xs text-slate-500">mm</span>
+        </div>
+        <p class="text-xs text-slate-500 mt-3" id="valRainSource">Nguồn: Vệ tinh khí tượng</p>
+      </div>
+
+      <div class="p-5 rounded-2xl card-clean">
+        <div class="flex justify-between items-start">
+          <span class="text-xs font-medium text-slate-500">Dự báo 7 ngày tới</span>
+          <span class="p-2 rounded-lg bg-indigo-50 text-indigo-600"><i data-lucide="calendar" class="w-4 h-4"></i></span>
+        </div>
+        <div class="mt-3 flex items-baseline gap-2">
+          <span class="text-3xl font-bold text-slate-900 tracking-tight" id="valUpcomingRainCount">0</span>
+          <span class="text-xs text-slate-500">ngày mưa ≥ ngưỡng</span>
+        </div>
+        <p class="text-xs text-slate-500 mt-3" id="valNextBigRain">Không có mưa lớn</p>
+      </div>
+
+      <div class="p-5 rounded-2xl card-clean">
+        <div class="flex justify-between items-start">
+          <span class="text-xs font-medium text-slate-500">Sản lượng điện sạch/ngày (E<sub>d</sub>)</span>
+          <span class="p-2 rounded-lg bg-emerald-50 text-emerald-600"><i data-lucide="zap" class="w-4 h-4"></i></span>
+        </div>
+        <div class="mt-3 flex items-baseline gap-2">
+          <span class="text-3xl font-bold text-slate-900 tracking-tight" id="valEdDisp">400.00</span>
+          <span class="text-xs text-slate-500">kWh/ngày</span>
+        </div>
+        <p class="text-xs text-slate-500 mt-3">Doanh thu chuẩn: <span id="dispDailyCleanRev" class="text-slate-700 font-medium">800.000 VNĐ/ngày</span></p>
+      </div>
+    </div>
+
+    <!-- CHARTS & PARAMETERS -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="lg:col-span-2 p-5 rounded-2xl card-clean space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 class="text-base font-semibold text-slate-900">Diễn Biến Lượng Mưa & Tổn Thất Soiling Tại Dự Án</h3>
+            <p class="text-xs text-slate-500">Dữ liệu kết hợp mưa quan trắc, dự báo vệ tinh và ngưỡng tới hạn L*</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-3 text-xs">
+            <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-amber-500 inline-block"></span> Tổn thất L<sub>t</sub> (%)</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 border-t border-dashed border-red-500 inline-block"></span> Ngưỡng L*</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500 inline-block"></span> Mưa thực tế</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-400 inline-block"></span> Mưa dự báo</span>
+          </div>
+        </div>
+        <div class="h-80 w-full relative">
+          <canvas id="mainChart"></canvas>
+        </div>
+      </div>
+
+      <div class="p-5 rounded-2xl card-clean space-y-4 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between">
+            <h3 class="text-base font-semibold text-slate-900 flex items-center gap-2">
+              <i data-lucide="sliders" class="w-4 h-4 text-blue-600"></i> Tham Số O&M Dự Án
+            </h3>
+            <button onclick="saveProjectParamsFromQuickInputs()" class="text-xs font-semibold text-blue-600 hover:text-blue-800">Lưu thay đổi</button>
+          </div>
+          <p class="text-xs text-slate-500 mt-1">Điều chỉnh nhanh để xem ngay thay đổi ngưỡng L* và chu kỳ T*</p>
+
+          <div class="mt-4 space-y-3 text-xs">
+            <div>
+              <label class="block text-slate-600 mb-1 font-medium">Công suất hệ PV (P<sub>peak</sub>) [kWp]</label>
+              <input type="number" id="quickP" step="0.1" min="1" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none" oninput="onQuickParamChange()">
+            </div>
+
+            <div>
+              <label class="block text-slate-600 mb-1 font-medium">Chi phí 1 lần rửa (C<sub>clean</sub>) [VNĐ]</label>
+              <input type="number" id="quickC" step="100000" min="50000" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none" oninput="onQuickParamChange()">
+            </div>
+
+            <div>
+              <label class="block text-slate-600 mb-1 font-medium">Đơn giá điện (p) [VNĐ/kWh]</label>
+              <input type="number" id="quickPrice" step="10" min="500" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none" oninput="onQuickParamChange()">
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-slate-600 mb-1 font-medium">Bụi r (%/ngày)</label>
+                <input type="number" id="quickR" step="0.01" min="0.01" max="5.0" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none" oninput="onQuickParamChange()">
+              </div>
+              <div>
+                <label class="block text-slate-600 mb-1 font-medium">Mưa rửa Kimber (mm)</label>
+                <input type="number" id="quickRainThresh" step="0.1" min="1.0" max="30.0" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none" oninput="onQuickParamChange()">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 mt-4 text-xs space-y-2">
+          <div class="flex justify-between text-slate-600">
+            <span>Chu kỳ vệ sinh tối ưu (T*):</span>
+            <span class="font-bold text-slate-900" id="calcTStar">-- ngày</span>
+          </div>
+          <div class="flex justify-between text-slate-600">
+            <span>Ngưỡng suy giảm tới hạn (L*):</span>
+            <span class="font-bold text-amber-600 text-sm" id="calcLStar">-- %</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TIMELINE TABLE -->
+    <div class="p-5 rounded-2xl card-clean space-y-3">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div>
+          <h3 class="text-base font-semibold text-slate-900">Bảng Chuỗi Thời Gian & Khuyến Nghị Vệ Sinh</h3>
+          <p class="text-xs text-slate-500">Lịch sử quan trắc khí tượng theo tọa độ địa lý của dự án</p>
+        </div>
+        <span class="text-xs text-slate-500 font-medium" id="tableStatusTag">Đang cập nhật...</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-50 text-slate-600 border-b border-slate-200">
+            <tr>
+              <th class="py-2.5 px-3">Thời gian</th>
+              <th class="py-2.5 px-3">Phân loại dữ liệu</th>
+              <th class="py-2.5 px-3">Lượng mưa (mm)</th>
+              <th class="py-2.5 px-3">Tổn thất tích lũy (L<sub>t</sub>)</th>
+              <th class="py-2.5 px-3">Tác động thời tiết</th>
+              <th class="py-2.5 px-3">Khuyến nghị O&M</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody" class="divide-y divide-slate-100 text-slate-700 font-sans">
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- MODAL: ADD / EDIT PROJECT -->
+  <div id="projectModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="card-clean rounded-2xl w-full max-w-xl p-6 bg-white shadow-2xl relative max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+        <div class="flex items-center gap-2">
+          <span class="p-2 rounded-xl bg-blue-50 text-blue-600"><i data-lucide="layers" class="w-5 h-5"></i></span>
+          <h3 class="text-base font-bold text-slate-900" id="projectModalTitle">Thêm Dự Án PV Mới</h3>
+        </div>
+        <button onclick="closeProjectModal()" class="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+
+      <form id="projectForm" onsubmit="handleProjectSubmit(event)" class="space-y-4 text-xs">
+        <input type="hidden" id="editProjectId">
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Tên dự án điện mặt trời</label>
+          <input type="text" id="projName" required placeholder="VD: Nhà Máy PV Mái KCN Linh Trung" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Tọa độ Vĩ độ (Latitude)</label>
+            <input type="number" id="projLat" step="0.0001" required value="10.7769" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Tọa độ Kinh độ (Longitude)</label>
+            <input type="number" id="projLon" step="0.0001" required value="106.7009" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Công suất P<sub>peak</sub> (kWp)</label>
+            <input type="number" id="projPpeak" step="0.1" min="1" required value="100.0" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Số giờ nắng đỉnh (PSH) [h/ngày]</label>
+            <input type="number" id="projPSH" step="0.1" min="1" max="8" required value="4.0" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Chi phí 1 lần vệ sinh C<sub>clean</sub> (VNĐ)</label>
+            <input type="number" id="projCclean" step="50000" min="50000" required value="2500000" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Đơn giá điện bán/tiết kiệm (VNĐ/kWh)</label>
+            <input type="number" id="projPrice" step="10" min="500" required value="2000" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Tốc độ bám bụi r (%/ngày)</label>
+            <input type="number" id="projR" step="0.01" min="0.01" max="5.0" required value="0.15" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Ngưỡng mưa tự rửa Kimber (mm)</label>
+            <input type="number" id="projRainThresh" step="0.1" min="1.0" max="30.0" required value="6.0" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-4 border-t border-slate-100 gap-3">
+          <button type="button" id="btnDeleteProject" onclick="confirmDeleteProject()" class="hidden px-4 py-2.5 rounded-xl text-rose-600 hover:bg-rose-50 font-semibold border border-rose-200 transition">
+            Xóa dự án này
+          </button>
+          <div class="flex items-center gap-2 ml-auto">
+            <button type="button" onclick="closeProjectModal()" class="px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 font-medium transition">Hủy</button>
+            <button type="submit" class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-md shadow-blue-500/20 transition flex items-center gap-1.5">
+              <i data-lucide="check" class="w-4 h-4"></i> Lưu lên đám mây
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- SUPABASE JAVASCRIPT LOGIC -->
+  <script>
+    // =========================================================================
+    // THÔNG SỐ DỰ ÁN SUPABASE CỦA BẠN (ĐÃ TỰ ĐỘNG GẮN VÀO)
+    // =========================================================================
+    const SUPABASE_URL = "https://iygzsbqluttnkyxdzlqa.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_q6Bu71fxYLFXgqmjCMtRMA_UREMDaJKp";
+
+    // Khởi tạo an toàn Supabase client
+    let supabaseClient = null;
+    try {
+      if (window.supabase && typeof window.supabase.createClient === 'function') {
+        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      }
+    } catch (err) {
+      console.warn("Lỗi khởi tạo Supabase Client:", err);
+    }
+
+    // Trạng thái ứng dụng
+    let currentUser = null;
+    let authMode = 'login'; // 'login' hoặc 'register'
+    let currentProjects = [];
+    let activeProject = null;
+    let combinedTimeline = [];
+    let chartInstance = null;
+
+    let calculatedLStar = 0.048;
+    let calculatedTStar = 32;
+
+    function showAuthAlert(msg, type = 'error') {
+      const box = document.getElementById('authAlertBox');
+      const text = document.getElementById('authAlertMsg');
+      if (!box || !text) return;
+
+      box.classList.remove('hidden', 'bg-rose-50', 'text-rose-700', 'border-rose-200', 'bg-emerald-50', 'text-emerald-700', 'border-emerald-200', 'bg-amber-50', 'text-amber-700', 'border-amber-200');
+
+      if (type === 'error') {
+        box.classList.add('bg-rose-50', 'text-rose-700', 'border-rose-200');
+      } else if (type === 'success') {
+        box.classList.add('bg-emerald-50', 'text-emerald-700', 'border-emerald-200');
+      } else {
+        box.classList.add('bg-amber-50', 'text-amber-700', 'border-amber-200');
+      }
+
+      text.innerText = msg;
+      box.classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    // Hàm tạo Toast thông báo
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      
+      let borderCol = 'border-blue-200 bg-white text-slate-800';
+      let icon = '<i data-lucide="info" class="w-4 h-4 text-blue-600"></i>';
+
+      if (type === 'success') {
+        borderCol = 'border-emerald-200 bg-white text-slate-800';
+        icon = '<i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-600"></i>';
+      } else if (type === 'error') {
+        borderCol = 'border-rose-200 bg-white text-slate-800';
+        icon = '<i data-lucide="alert-triangle" class="w-4 h-4 text-rose-600"></i>';
+      } else if (type === 'warning') {
+        borderCol = 'border-amber-200 bg-white text-slate-800';
+        icon = '<i data-lucide="alert-circle" class="w-4 h-4 text-amber-600"></i>';
+      }
+
+      toast.className = `p-3.5 rounded-xl border ${borderCol} shadow-lg shadow-slate-200/50 flex items-center gap-2.5 text-xs font-medium pointer-events-auto transition-all transform duration-300 opacity-0 translate-y-2`;
+      toast.innerHTML = `${icon} <span class="flex-1">${message}</span>`;
+      container.appendChild(toast);
+      lucide.createIcons();
+
+      requestAnimationFrame(() => toast.classList.remove('opacity-0', 'translate-y-2'));
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, 4000);
+    }
+
+    function formatVND(val) {
+      return new Intl.NumberFormat('vi-VN').format(Math.round(val)) + ' VNĐ';
+    }
+
+    // Toggle chế độ Đăng nhập / Đăng ký
+    function toggleAuthMode() {
+      authMode = authMode === 'login' ? 'register' : 'login';
+      const title = document.getElementById('authTitle');
+      const subtitle = document.getElementById('authSubtitle');
+      const submitText = document.getElementById('authSubmitText');
+      const question = document.getElementById('authToggleQuestion');
+      const toggleBtn = document.getElementById('authToggleBtn');
+      const alertBox = document.getElementById('authAlertBox');
+      if (alertBox) alertBox.classList.add('hidden');
+
+      if (authMode === 'register') {
+        title.innerText = "Tạo tài khoản kỹ sư O&M";
+        subtitle.innerText = "Lưu dự án trực tiếp vào cơ sở dữ liệu Supabase";
+        submitText.innerText = "Đăng ký tài khoản";
+        question.innerText = "Đã có tài khoản kỹ sư?";
+        toggleBtn.innerText = "Đăng nhập ngay";
+      } else {
+        title.innerText = "Đăng nhập PV O&M Platform";
+        subtitle.innerText = "Đồng bộ đám mây Supabase - Quản lý mọi thiết bị";
+        submitText.innerText = "Đăng nhập";
+        question.innerText = "Chưa có tài khoản kỹ sư?";
+        toggleBtn.innerText = "Tạo tài khoản mới";
+      }
+      lucide.createIcons();
+    }
+
+    // Xử lý click trực tiếp vào nút Đăng nhập / Đăng ký
+    async function handleAuthSubmitDirect() {
+      const emailInput = document.getElementById('authEmailInput');
+      const passwordInput = document.getElementById('authPasswordInput');
+      const submitBtn = document.getElementById('authSubmitBtn');
+      const submitText = document.getElementById('authSubmitText');
+
+      const email = emailInput ? emailInput.value.trim() : '';
+      const password = passwordInput ? passwordInput.value.trim() : '';
+
+      if (!email || !password) {
+        showAuthAlert("Vui lòng nhập đầy đủ Email và Mật khẩu!");
+        return;
+      }
+
+      if (password.length < 6) {
+        showAuthAlert("Mật khẩu phải có độ dài từ 6 ký tự trở lên!");
+        return;
+      }
+
+      // Đổi trạng thái nút bấm
+      submitBtn.disabled = true;
+      const originalText = submitText.innerText;
+      submitText.innerText = authMode === 'register' ? "Đang đăng ký..." : "Đang xác thực...";
+
+      try {
+        if (!supabaseClient) {
+          // Fallback lưu trình duyệt nếu CDN bị chặn
+          currentUser = { id: 'local_' + btoa(email).slice(0, 10), email: email };
+          onAuthSuccess("Đăng nhập thành công ở chế độ Offline (Bộ nhớ trình duyệt)!");
+          return;
+        }
+
+        if (authMode === 'register') {
+          const { data, error } = await supabaseClient.auth.signUp({ 
+            email: email, 
+            password: password 
+          });
+
+          if (error) throw error;
+
+          if (data && data.session) {
+            currentUser = data.user;
+            onAuthSuccess("Đăng ký thành công và đã tự động đăng nhập!");
+          } else if (data && data.user) {
+            showAuthAlert("Đăng ký thành công! Bạn có thể chuyển sang 'Đăng nhập ngay' để vào hệ thống.", "success");
+            toggleAuthMode();
+          }
+        } else {
+          const { data, error } = await supabaseClient.auth.signInWithPassword({ 
+            email: email, 
+            password: password 
+          });
+
+          if (error) {
+            if (error.message.includes("Email not confirmed")) {
+              throw new Error("Tài khoản chưa được kích hoạt qua email. Vui lòng kiểm tra hộp thư hoặc tắt Email Confirmation trên Supabase Auth Settings.");
+            }
+            throw error;
+          }
+
+          currentUser = data.user;
+          onAuthSuccess(`Đăng nhập thành công! Xin chào ${currentUser.email}`);
+        }
+      } catch (err) {
+        console.error("Lỗi xác thực:", err);
+        showAuthAlert(err.message || "Không thể kết nối đến máy chủ xác thực!");
+      } finally {
+        submitBtn.disabled = false;
+        submitText.innerText = originalText;
+        lucide.createIcons();
+      }
+    }
+
+    async function onAuthSuccess(msg) {
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('userNameDisplay').innerText = currentUser.email;
+      const initials = (currentUser.email.slice(0, 2) || 'PV').toUpperCase();
+      document.getElementById('userAvatar').innerText = initials;
+      showToast(msg, "success");
+      await loadUserProjects();
+    }
+
+    async function handleLogout() {
+      if (supabaseClient) {
+        try {
+          await supabaseClient.auth.signOut();
+        } catch (e) {}
+      }
+      currentUser = null;
+      document.getElementById('authScreen').classList.remove('hidden');
+      showToast("Đã đăng xuất an toàn khỏi hệ thống.", "info");
+    }
+
+    // Tải dự án từ Supabase (có fallback an toàn)
+    async function loadUserProjects() {
+      if (!currentUser || !supabaseClient) return;
+
+      try {
+        const { data, error } = await supabaseClient
+          .from('projects')
+          .select('*')
+          .eq('user_id', currentUser.id)
+          .order('created_at', { ascending: true });
+
+        if (error || !data || data.length === 0) {
+          // Khởi tạo dự án mặc định nếu chưa có
+          const defaultProject = {
+            id: 'proj_' + Date.now(),
+            user_id: currentUser.id,
+            name: 'Nhà Máy PV Mái KCN Linh Trung - TP.HCM',
+            lat: 10.7769,
+            lon: 106.7009,
+            p_peak: 100.0,
+            psh: 4.0,
+            c_clean: 2500000,
+            price: 2000,
+            r_daily: 0.15,
+            rain_thresh: 6.0
+          };
+
+          // Lưu thử lên Supabase
+          await supabaseClient.from('projects').insert([defaultProject]);
+          currentProjects = [defaultProject];
+        } else {
+          currentProjects = data;
+        }
+      } catch (e) {
+        console.warn("Chuyển sang bộ nhớ dự phòng:", e);
+        const localKey = 'PV_LOCAL_PROJS_' + currentUser.id;
+        const stored = localStorage.getItem(localKey);
+        currentProjects = stored ? JSON.parse(stored) : [{
+          id: 'proj_' + Date.now(),
+          user_id: currentUser.id,
+          name: 'Nhà Máy PV Mái KCN Linh Trung - TP.HCM',
+          lat: 10.7769,
+          lon: 106.7009,
+          p_peak: 100.0,
+          psh: 4.0,
+          c_clean: 2500000,
+          price: 2000,
+          r_daily: 0.15,
+          rain_thresh: 6.0
+        }];
+      }
+
+      renderProjectSelectDropdown();
+      switchProject(currentProjects[0].id);
+    }
+
+    function renderProjectSelectDropdown() {
+      const select = document.getElementById('projectSelect');
+      select.innerHTML = '';
+      currentProjects.forEach(proj => {
+        const opt = document.createElement('option');
+        opt.value = proj.id;
+        opt.innerText = proj.name;
+        select.appendChild(opt);
+      });
+    }
+
+    function switchProject(projectId) {
+      const proj = currentProjects.find(p => p.id === projectId) || currentProjects[0];
+      if (!proj) return;
+      activeProject = proj;
+
+      document.getElementById('projectSelect').value = proj.id;
+      document.getElementById('topbarProjectCoords').innerText = `${Number(proj.lat).toFixed(4)}°N, ${Number(proj.lon).toFixed(4)}°E`;
+      document.getElementById('badgeLocationName').innerText = proj.name.split('-')[0].trim();
+      document.getElementById('badgePpeak').innerText = `${Number(proj.p_peak).toFixed(1)} kWp`;
+
+      // Cập nhật tham số nhanh
+      document.getElementById('quickP').value = proj.p_peak;
+      document.getElementById('quickC').value = proj.c_clean;
+      document.getElementById('quickPrice').value = proj.price;
+      document.getElementById('quickR').value = proj.r_daily;
+      document.getElementById('quickRainThresh').value = proj.rain_thresh;
+
+      calculateModelThresholds();
+      fetchLiveDataForCurrentProject();
+    }
+
+    function openProjectModal(mode = 'new') {
+      const modal = document.getElementById('projectModal');
+      const title = document.getElementById('projectModalTitle');
+      const delBtn = document.getElementById('btnDeleteProject');
+      const editId = document.getElementById('editProjectId');
+
+      if (mode === 'edit' && activeProject) {
+        title.innerText = "Chỉnh sửa thông số dự án PV";
+        editId.value = activeProject.id;
+        delBtn.classList.remove('hidden');
+
+        document.getElementById('projName').value = activeProject.name;
+        document.getElementById('projLat').value = activeProject.lat;
+        document.getElementById('projLon').value = activeProject.lon;
+        document.getElementById('projPpeak').value = activeProject.p_peak;
+        document.getElementById('projPSH').value = activeProject.psh;
+        document.getElementById('projCclean').value = activeProject.c_clean;
+        document.getElementById('projPrice').value = activeProject.price;
+        document.getElementById('projR').value = activeProject.r_daily;
+        document.getElementById('projRainThresh').value = activeProject.rain_thresh;
+      } else {
+        title.innerText = "Thêm Dự Án PV Mới";
+        editId.value = '';
+        delBtn.classList.add('hidden');
+        document.getElementById('projectForm').reset();
+        document.getElementById('projLat').value = 10.7769;
+        document.getElementById('projLon').value = 106.7009;
+        document.getElementById('projPpeak').value = 100.0;
+        document.getElementById('projPSH').value = 4.0;
+        document.getElementById('projCclean').value = 2500000;
+        document.getElementById('projPrice').value = 2000;
+        document.getElementById('projR').value = 0.15;
+        document.getElementById('projRainThresh').value = 6.0;
+      }
+
+      modal.classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeProjectModal() {
+      document.getElementById('projectModal').classList.add('hidden');
+    }
+
+    async function handleProjectSubmit(e) {
+      e.preventDefault();
+      const editId = document.getElementById('editProjectId').value;
+
+      const projData = {
+        name: document.getElementById('projName').value.trim(),
+        lat: parseFloat(document.getElementById('projLat').value),
+        lon: parseFloat(document.getElementById('projLon').value),
+        p_peak: parseFloat(document.getElementById('projPpeak').value),
+        psh: parseFloat(document.getElementById('projPSH').value),
+        c_clean: parseFloat(document.getElementById('projCclean').value),
+        price: parseFloat(document.getElementById('projPrice').value),
+        r_daily: parseFloat(document.getElementById('projR').value),
+        rain_thresh: parseFloat(document.getElementById('projRainThresh').value),
+        user_id: currentUser.id
+      };
+
+      try {
+        if (editId) {
+          if (supabaseClient) {
+            await supabaseClient.from('projects').update(projData).eq('id', editId);
+          }
+          const idx = currentProjects.findIndex(p => p.id === editId);
+          if (idx >= 0) currentProjects[idx] = { ...currentProjects[idx], ...projData };
+          showToast('Đã cập nhật dự án thành công!', 'success');
+        } else {
+          const newId = 'proj_' + Date.now();
+          const newProj = { id: newId, ...projData };
+          if (supabaseClient) {
+            await supabaseClient.from('projects').insert([newProj]);
+          }
+          currentProjects.push(newProj);
+          showToast(`Đã thêm dự án "${newProj.name}" vào Cloud!`, 'success');
+        }
+      } catch (err) {
+        showToast("Lưu vào bộ nhớ trình duyệt: " + err.message, "warning");
+      }
+
+      // Lưu song song vào localStorage để phòng mất kết nối
+      localStorage.setItem('PV_LOCAL_PROJS_' + currentUser.id, JSON.stringify(currentProjects));
+      renderProjectSelectDropdown();
+      switchProject(editId || currentProjects[currentProjects.length - 1].id);
+      closeProjectModal();
+    }
+
+    async function confirmDeleteProject() {
+      const editId = document.getElementById('editProjectId').value;
+      if (!editId) return;
+
+      if (currentProjects.length <= 1) {
+        showToast('Bạn phải giữ lại ít nhất 1 dự án trên hệ thống!', 'warning');
+        return;
+      }
+
+      try {
+        if (supabaseClient) {
+          await supabaseClient.from('projects').delete().eq('id', editId);
+        }
+      } catch (e) {}
+
+      currentProjects = currentProjects.filter(p => p.id !== editId);
+      localStorage.setItem('PV_LOCAL_PROJS_' + currentUser.id, JSON.stringify(currentProjects));
+      renderProjectSelectDropdown();
+      switchProject(currentProjects[0].id);
+      closeProjectModal();
+      showToast('Đã xóa dự án thành công.', 'info');
+    }
+
+    function onQuickParamChange() {
+      if (!activeProject) return;
+      activeProject.p_peak = parseFloat(document.getElementById('quickP').value) || 100;
+      activeProject.c_clean = parseFloat(document.getElementById('quickC').value) || 2500000;
+      activeProject.price = parseFloat(document.getElementById('quickPrice').value) || 2000;
+      activeProject.r_daily = parseFloat(document.getElementById('quickR').value) || 0.15;
+      activeProject.rain_thresh = parseFloat(document.getElementById('quickRainThresh').value) || 6.0;
+
+      calculateModelThresholds();
+      runSimulation();
+    }
+
+    async function saveProjectParamsFromQuickInputs() {
+      onQuickParamChange();
+      try {
+        if (supabaseClient) {
+          await supabaseClient.from('projects').update({
+            p_peak: activeProject.p_peak,
+            c_clean: activeProject.c_clean,
+            price: activeProject.price,
+            r_daily: activeProject.r_daily,
+            rain_thresh: activeProject.rain_thresh
+          }).eq('id', activeProject.id);
+        }
+      } catch (e) {}
+      localStorage.setItem('PV_LOCAL_PROJS_' + currentUser.id, JSON.stringify(currentProjects));
+      showToast('Đã lưu tham số O&M lên đám mây!', 'success');
+    }
+
+    // Tính toán T* và L* theo mô hình kinh tế O&M
+    function calculateModelThresholds() {
+      if (!activeProject) return;
+      const Ed = activeProject.p_peak * activeProject.psh;
+      const r_frac = activeProject.r_daily / 100;
+
+      calculatedTStar = Math.round(Math.sqrt((2 * activeProject.c_clean) / (r_frac * Ed * activeProject.price)));
+      calculatedLStar = Math.sqrt((2 * activeProject.c_clean * r_frac) / (Ed * activeProject.price));
+
+      document.getElementById('calcTStar').innerText = calculatedTStar + ' ngày';
+      document.getElementById('calcLStar').innerText = (calculatedLStar * 100).toFixed(2) + ' %';
+      document.getElementById('valThresholdComp').innerText = `/ ${(calculatedLStar * 100).toFixed(2)}% (L*)`;
+      document.getElementById('valEdDisp').innerText = Ed.toFixed(2);
+      document.getElementById('dispDailyCleanRev').innerText = formatVND(Ed * activeProject.price) + '/ngày';
+      document.getElementById('statusRule').innerText = `Ngưỡng L* = ${(calculatedLStar * 100).toFixed(2)}% | Ngưỡng Kimber = ${Number(activeProject.rain_thresh).toFixed(2)} mm`;
+    }
+
+    // Đồng bộ thời tiết Open-Meteo theo tọa độ dự án
+    async function fetchLiveDataForCurrentProject() {
+      if (!activeProject) return;
+      const syncIcon = document.getElementById('syncIcon');
+      syncIcon.classList.add('animate-spin');
+
+      const lat = activeProject.lat;
+      const lon = activeProject.lon;
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=precipitation_sum&past_days=21&forecast_days=7&timezone=Asia%2FBangkok`;
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("Lỗi nạp Open-Meteo");
+        const data = await response.json();
+
+        const dates = data.daily.time;
+        const rains = data.daily.precipitation_sum;
+        const todayStr = new Date().toISOString().slice(0, 10);
+
+        combinedTimeline = dates.map((dateStr, idx) => {
+          const isFuture = dateStr > todayStr;
+          const isToday = dateStr === todayStr;
+          return {
+            date: dateStr,
+            rain: rains[idx] !== null ? rains[idx] : 0,
+            type: isFuture ? 'Dự báo' : (isToday ? 'Hôm nay' : 'Quá khứ'),
+            isForecast: isFuture,
+            overrideLoss: null
+          };
+        });
+
+        document.getElementById('valRainSource').innerText = `Vệ tinh Open-Meteo (${Number(lat).toFixed(2)}, ${Number(lon).toFixed(2)})`;
+        document.getElementById('tableStatusTag').innerText = `Đã đồng bộ lúc ${new Date().toLocaleTimeString('vi-VN')}`;
+        runSimulation();
+      } catch (err) {
+        console.warn("API Open-Meteo lỗi, dùng dữ liệu dự phòng", err);
+        fallbackWeatherData();
+      } finally {
+        syncIcon.classList.remove('animate-spin');
+      }
+    }
+
+    function fallbackWeatherData() {
+      const baseDates = [];
+      const now = new Date();
+      for (let i = -14; i <= 6; i++) {
+        const d = new Date();
+        d.setDate(now.getDate() + i);
+        baseDates.push(d.toISOString().slice(0, 10));
+      }
+
+      const sampleRains = [0.0, 1.2, 8.5, 12.0, 0.4, 0.0, 2.8, 15.6, 3.2, 0.0, 0.0, 6.8, 0.0, 1.1, 0.0, 0.0, 9.4, 1.5, 0.0, 0.0, 14.2];
+      const todayStr = new Date().toISOString().slice(0, 10);
+
+      combinedTimeline = baseDates.map((d, i) => ({
+        date: d,
+        rain: sampleRains[i % sampleRains.length],
+        type: d > todayStr ? 'Dự báo' : (d === todayStr ? 'Hôm nay' : 'Quá khứ'),
+        isForecast: d > todayStr,
+        overrideLoss: null
+      }));
+      runSimulation();
+    }
+
+    function confirmCleanNow() {
+      if (!combinedTimeline.length) return;
+      const todayIdx = combinedTimeline.findIndex(d => d.type === 'Hôm nay');
+      const targetIdx = todayIdx >= 0 ? todayIdx : combinedTimeline.length - 1;
+
+      combinedTimeline[targetIdx].overrideLoss = 0.0;
+      showToast("Đã xác nhận vệ sinh tấm pin! Tổn thất được reset về 0%.", "success");
+      runSimulation();
+    }
+
+    // Mô phỏng hiệu quả kinh tế O&M
+    function runSimulation() {
+      if (!combinedTimeline.length || !activeProject) return;
+
+      const Ed = activeProject.p_peak * activeProject.psh;
+      const r_frac = activeProject.r_daily / 100;
+      const rainThresh = Number(activeProject.rain_thresh);
+
+      let currentLossProp = 0;
+      const lossHistory = [];
+
+      let kb1_clean_count = 0;
+      let kb1_loss_money = 0;
+      let curLossKb1 = 0;
+
+      let kb2_clean_count = 0;
+      let kb2_loss_money = 0;
+
+      combinedTimeline.forEach((item, idx) => {
+        // Kịch bản Tối Ưu (KB2)
+        if (item.overrideLoss !== null && item.overrideLoss !== undefined) {
+          currentLossProp = item.overrideLoss / 100;
+        } else {
+          if (item.rain >= rainThresh) {
+            currentLossProp = 0;
+          } else {
+            currentLossProp += r_frac;
+          }
+        }
+
+        if (currentLossProp >= calculatedLStar) {
+          kb2_clean_count++;
+          currentLossProp = 0;
+        }
+
+        lossHistory.push(currentLossProp * 100);
+        kb2_loss_money += currentLossProp * Ed * activeProject.price;
+
+        // Kịch bản Định kỳ 90 ngày (KB1)
+        if (idx > 0 && idx % 90 === 0) {
+          kb1_clean_count++;
+          curLossKb1 = 0;
+        } else if (item.rain >= rainThresh) {
+          curLossKb1 = 0;
+        } else {
+          curLossKb1 += r_frac;
+        }
+        kb1_loss_money += curLossKb1 * Ed * activeProject.price;
+      });
+
+      let todayIdx = combinedTimeline.findIndex(d => d.type === 'Hôm nay');
+      if (todayIdx < 0) todayIdx = combinedTimeline.length - 1;
+
+      const todayItem = combinedTimeline[todayIdx];
+      const todayLoss = lossHistory[todayIdx];
+
+      const futureItems = combinedTimeline.filter(d => d.isForecast);
+      const upcomingRainyDays = futureItems.filter(d => d.rain >= rainThresh);
+      document.getElementById('valUpcomingRainCount').innerText = upcomingRainyDays.length;
+      if (upcomingRainyDays.length > 0) {
+        document.getElementById('valNextBigRain').innerText = `Mưa lớn tới: ${upcomingRainyDays[0].date.slice(5)} (${Number(upcomingRainyDays[0].rain).toFixed(1)} mm)`;
+      } else {
+        document.getElementById('valNextBigRain').innerText = "7 ngày tới: Không có mưa lớn";
+      }
+
+      document.getElementById('valCurrentLoss').innerText = todayLoss.toFixed(2) + '%';
+      document.getElementById('valTodayRain').innerText = Number(todayItem.rain).toFixed(2);
+
+      const progressPercent = Math.min(100, (todayLoss / (calculatedLStar * 100)) * 100);
+      document.getElementById('lossProgressBar').style.width = progressPercent + '%';
+
+      // Tính tổng kinh tế
+      const kb1_clean_cost = Math.max(1, kb1_clean_count) * activeProject.c_clean;
+      const kb1_total = kb1_clean_cost + kb1_loss_money;
+
+      const kb2_clean_cost = kb2_clean_count * activeProject.c_clean;
+      const kb2_total = kb2_clean_cost + kb2_loss_money;
+
+      const total_savings = Math.max(0, kb1_total - kb2_total);
+      const saving_percent = kb1_total > 0 ? (total_savings / kb1_total) * 100 : 0;
+
+      document.getElementById('dispKb1Count').innerText = `${Math.max(1, kb1_clean_count)} lần rửa`;
+      document.getElementById('dispKb1CleanCost').innerText = formatVND(kb1_clean_cost);
+      document.getElementById('dispKb1LossMoney').innerText = formatVND(kb1_loss_money);
+      document.getElementById('dispKb1Total').innerText = formatVND(kb1_total);
+
+      document.getElementById('dispKb2Count').innerText = `${kb2_clean_count} lần rửa`;
+      document.getElementById('dispKb2CleanCost').innerText = formatVND(kb2_clean_cost);
+      document.getElementById('dispKb2LossMoney').innerText = formatVND(kb2_loss_money);
+      document.getElementById('dispKb2Total').innerText = formatVND(kb2_total);
+
+      document.getElementById('dispTotalSavings').innerText = formatVND(total_savings);
+      document.getElementById('dispSavingPercentBadge').innerText = `(Tiết kiệm ${saving_percent.toFixed(1)}%)`;
+
+      updateDecisionBanner(todayItem, todayLoss, upcomingRainyDays);
+      renderTable(lossHistory);
+      renderChart(lossHistory);
+      lucide.createIcons();
+    }
+
+    function updateDecisionBanner(todayItem, todayLoss, upcomingRainyDays) {
+      const banner = document.getElementById('statusBanner');
+      const badge = document.getElementById('statusBadge');
+      const title = document.getElementById('statusTitle');
+      const desc = document.getElementById('statusDesc');
+      const actionBtn = document.getElementById('actionBtn');
+      const iconWrap = document.getElementById('statusIconWrap');
+
+      const isCritical = todayLoss >= (calculatedLStar * 100);
+      const isRainWashedToday = todayItem.rain >= activeProject.rain_thresh;
+      const willRainSoon = upcomingRainyDays.length > 0;
+
+      if (isRainWashedToday) {
+        banner.className = "p-5 rounded-2xl border transition-all duration-300 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 card-clean border-blue-200 bg-blue-50/50";
+        badge.className = "text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-100 text-blue-700";
+        badge.innerText = "TỰ NHIÊN LÀM SẠCH";
+        title.innerText = `Cơn mưa ${Number(todayItem.rain).toFixed(2)} mm hôm nay đã làm sạch bề mặt pin!`;
+        desc.innerText = `Lượng mưa vượt ngưỡng Kimber (${Number(activeProject.rain_thresh).toFixed(1)} mm). Tiết kiệm hoàn toàn chi phí rửa pin.`;
+        actionBtn.className = "w-full md:w-auto px-5 py-2.5 rounded-xl font-semibold text-sm bg-slate-100 text-slate-400 cursor-not-allowed flex items-center justify-center gap-2 border border-slate-200";
+        actionBtn.disabled = true;
+        iconWrap.className = "p-3.5 rounded-xl bg-blue-100 text-blue-600";
+        iconWrap.innerHTML = '<i data-lucide="cloud-rain" class="w-7 h-7"></i>';
+      } else if (isCritical) {
+        if (willRainSoon) {
+          banner.className = "p-5 rounded-2xl border transition-all duration-300 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 card-clean border-amber-300 bg-amber-50/50";
+          badge.className = "text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-100 text-amber-800";
+          badge.innerText = "TẠM HOÃN VỆ SINH (CÓ MƯA TỚI)";
+          title.innerText = `Tổn thất chạm ngưỡng L* (${todayLoss.toFixed(2)}%) nhưng có mưa lớn sắp tới (${upcomingRainyDays[0].date.slice(5)})`;
+          desc.innerText = `Dự báo có cơn mưa ${Number(upcomingRainyDays[0].rain).toFixed(1)} mm sắp tới. Khuyến nghị hoãn rửa để đón mưa tự nhiên.`;
+          actionBtn.className = "w-full md:w-auto px-5 py-2.5 rounded-xl font-semibold text-sm bg-amber-500 hover:bg-amber-600 text-white cursor-pointer flex items-center justify-center gap-2 shadow-sm";
+          actionBtn.disabled = false;
+          iconWrap.className = "p-3.5 rounded-xl bg-amber-100 text-amber-700";
+          iconWrap.innerHTML = '<i data-lucide="clock" class="w-7 h-7"></i>';
+        } else {
+          banner.className = "p-5 rounded-2xl border transition-all duration-300 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 card-clean border-rose-300 bg-rose-50/50";
+          badge.className = "text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700";
+          badge.innerText = "CẦN VỆ SINH NGAY";
+          title.innerText = `Tổn thất chạm ngưỡng L* (${todayLoss.toFixed(2)}% ≥ ${(calculatedLStar*100).toFixed(2)}%) & 7 ngày tới không mưa`;
+          desc.innerText = `Tiền điện tổn thất lũy kế đã vượt chi phí 1 lần rửa. Cần phát lệnh vệ sinh ngay để khôi phục công suất phát.`;
+          actionBtn.className = "w-full md:w-auto px-5 py-2.5 rounded-xl font-semibold text-sm bg-rose-600 hover:bg-rose-700 text-white shadow-sm cursor-pointer flex items-center justify-center gap-2";
+          actionBtn.disabled = false;
+          iconWrap.className = "p-3.5 rounded-xl bg-rose-100 text-rose-600";
+          iconWrap.innerHTML = '<i data-lucide="alert-triangle" class="w-7 h-7"></i>';
+        }
+      } else {
+        banner.className = "p-5 rounded-2xl border transition-all duration-300 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 card-clean border-emerald-200 bg-emerald-50/30";
+        badge.className = "text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-emerald-800";
+        badge.innerText = "CHƯA CẦN VỆ SINH";
+        title.innerText = `Hệ thống hoạt động tối ưu kinh tế (Tổn thất ${todayLoss.toFixed(2)}% < ${(calculatedLStar*100).toFixed(2)}%)`;
+        desc.innerText = `Tổn thất điện năng chưa đủ để bù đắp chi phí rửa (${formatVND(activeProject.c_clean)}). Tiếp tục theo dõi độ bám bụi.`;
+        actionBtn.className = "w-full md:w-auto px-5 py-2.5 rounded-xl font-semibold text-sm bg-slate-100 text-slate-400 cursor-not-allowed flex items-center justify-center gap-2 border border-slate-200";
+        actionBtn.disabled = true;
+        iconWrap.className = "p-3.5 rounded-xl bg-emerald-100 text-emerald-700";
+        iconWrap.innerHTML = '<i data-lucide="check-circle" class="w-7 h-7"></i>';
+      }
+    }
+
+    function renderTable(lossHistory) {
+      const tbody = document.getElementById('historyTableBody');
+      tbody.innerHTML = '';
+
+      combinedTimeline.forEach((item, i) => {
+        const lossVal = lossHistory[i];
+        const isRainWashed = item.rain >= activeProject.rain_thresh;
+        const isCritical = lossVal >= (calculatedLStar * 100);
+
+        let badgeTag = `<span class="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 border border-slate-200">${item.type}</span>`;
+        if (item.type === 'Hôm nay') {
+          badgeTag = `<span class="px-2 py-0.5 rounded text-[10px] bg-blue-100 text-blue-800 font-semibold border border-blue-200">${item.type}</span>`;
+        } else if (item.isForecast) {
+          badgeTag = `<span class="px-2 py-0.5 rounded text-[10px] bg-indigo-100 text-indigo-800 border border-indigo-200">${item.type}</span>`;
+        }
+
+        let actionBadge = `<span class="text-slate-400 font-medium">Chờ tích lũy</span>`;
+        if (isRainWashed) {
+          actionBadge = `<span class="text-blue-600 font-semibold">Tự rửa sạch (Reset)</span>`;
+        } else if (isCritical) {
+          actionBadge = `<span class="text-rose-600 font-semibold">Cần rửa pin</span>`;
+        }
+
+        const tr = document.createElement('tr');
+        tr.className = item.type === 'Hôm nay' ? 'bg-blue-50/60 font-medium' : 'hover:bg-slate-50';
+        tr.innerHTML = `
+          <td class="py-2.5 px-3 font-mono text-slate-900">${item.date}</td>
+          <td class="py-2.5 px-3">${badgeTag}</td>
+          <td class="py-2.5 px-3 ${item.rain >= activeProject.rain_thresh ? 'text-blue-600 font-bold' : 'text-slate-700'}">${Number(item.rain).toFixed(2)} mm</td>
+          <td class="py-2.5 px-3 font-mono text-amber-600 font-semibold">${lossVal.toFixed(2)}%</td>
+          <td class="py-2.5 px-3">${item.rain >= activeProject.rain_thresh ? '<span class="text-blue-600 font-medium">Mưa rửa trôi</span>' : (item.rain > 0 ? 'Mưa nhỏ (< ngưỡng)' : 'Khô ráo')}</td>
+          <td class="py-2.5 px-3">${actionBadge}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderChart(lossHistory) {
+      const labels = combinedTimeline.map(d => d.date.slice(5));
+      const rainData = combinedTimeline.map(d => d.rain);
+      const lStarLine = Array(labels.length).fill(calculatedLStar * 100);
+
+      const ctx = document.getElementById('mainChart').getContext('2d');
+      if (chartInstance) chartInstance.destroy();
+
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              type: 'line',
+              label: 'Tổn thất công suất (%)',
+              data: lossHistory,
+              borderColor: '#f59e0b',
+              backgroundColor: 'rgba(245, 158, 11, 0.08)',
+              borderWidth: 2.2,
+              tension: 0.2,
+              yAxisID: 'y1'
+            },
+            {
+              type: 'line',
+              label: 'Ngưỡng L*',
+              data: lStarLine,
+              borderColor: '#ef4444',
+              borderWidth: 1.5,
+              borderDash: [6, 4],
+              pointRadius: 0,
+              yAxisID: 'y1'
+            },
+            {
+              type: 'bar',
+              label: 'Lượng mưa (mm)',
+              data: rainData,
+              backgroundColor: combinedTimeline.map(d => d.isForecast ? 'rgba(129, 140, 248, 0.5)' : 'rgba(59, 130, 246, 0.65)'),
+              borderRadius: 4,
+              yAxisID: 'y'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          scales: {
+            x: { grid: { color: 'rgba(0, 0, 0, 0.04)' }, ticks: { color: '#64748b', font: { size: 10 } } },
+            y: {
+              type: 'linear',
+              position: 'left',
+              title: { display: true, text: 'Lượng mưa (mm)', color: '#2563eb', font: { size: 11 } },
+              grid: { color: 'rgba(0, 0, 0, 0.04)' },
+              ticks: { color: '#64748b' }
+            },
+            y1: {
+              type: 'linear',
+              position: 'right',
+              title: { display: true, text: 'Tổn thất (%)', color: '#d97706', font: { size: 11 } },
+              grid: { drawOnChartArea: false },
+              ticks: { color: '#64748b' }
+            }
+          },
+          plugins: {
+            legend: { display: true, labels: { color: '#334155', font: { size: 11 } } }
+          }
+        }
+      });
+    }
+
+    function exportToCSV() {
+      if (!combinedTimeline.length || !activeProject) return;
+      let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
+      csvContent += `Bao cao O&M Du an: ${activeProject.name}\n`;
+      csvContent += `Ppeak: ${activeProject.p_peak} kWp, C_clean: ${activeProject.c_clean} VND, Price: ${activeProject.price} VND/kWh\n\n`;
+      csvContent += "Ngay,Phan_loai,Luong_mua_mm,Ton_that_pct\n";
+
+      let curProp = 0;
+      const r_frac = activeProject.r_daily / 100;
+      combinedTimeline.forEach(item => {
+        if (item.overrideLoss !== null && item.overrideLoss !== undefined) {
+          curProp = item.overrideLoss / 100;
+        } else {
+          curProp = (item.rain >= activeProject.rain_thresh) ? 0 : (curProp + r_frac);
+        }
+        if (curProp >= calculatedLStar) curProp = 0;
+        csvContent += `${item.date},${item.type},${Number(item.rain).toFixed(2)},${(curProp * 100).toFixed(2)}\n`;
+      });
+
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `Bao_cao_OM_${activeProject.name.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast('Đã xuất báo cáo CSV thành công!', 'success');
+    }
+
+    // Kiểm tra phiên đăng nhập khi tải trang
+    window.addEventListener('DOMContentLoaded', async () => {
+      lucide.createIcons();
+
+      if (!supabaseClient) {
+        document.getElementById('authScreen').classList.remove('hidden');
+        return;
+      }
+
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (session && session.user) {
+          currentUser = session.user;
+          onAuthSuccess("Phiên làm việc tự động khôi phục từ Cloud.");
+        } else {
+          document.getElementById('authScreen').classList.remove('hidden');
+        }
+      } catch (e) {
+        document.getElementById('authScreen').classList.remove('hidden');
+      }
+    });
+  </script>
+</body>
+</html>
